@@ -141,10 +141,11 @@ A `manifest.json` is written into `--path` recording every successful download (
 - Ovani's orders page uses **decimal SI prefixes** for sizes. `1 KB` means `1000 bytes`, `1 MB` means `1 000 000 bytes`, and so on. That's why `_SIZE_UNITS` in the script uses 1000-multiples instead of 1024.
 - The download anchor on each asset row carries the URL inside an Alpine.js `x-bind:href` expression wrapped in a `(linksEnabled) ? '<url>' : '#'` ternary, not a plain `href`. The scraper pulls the real URL out of that expression.
 - Ovani's CDN returns HTTP 503 (not an empty page) when asked for a paginated page past the end. The pagination loop treats any 4xx or 5xx response beyond page 1 as end-of-list.
+- Because the same file can exist in multiple orders, each with its own download URL, the script deduplicates by destination path and keeps the copy from the highest order id.
 
 ### Known issues
 
 - **Authentication failed**: `cookies.txt` is missing required entries or expired. Repeat the Cookies setup step.
-- **`[WinError 32]` on rename**: Windows antivirus briefly locks the freshly downloaded `.part` file. The retry prompt at the end of the run almost always clears it.
+- **`[WinError 32]` on rename**: this used to happen when the same file showed up in more than one order. The script tried to save both copies to the same place at the same time, and Windows blocks that. It now spots those repeats first and downloads the file only once, so you should not see this anymore. If you do, it is usually your antivirus locking the file for a moment while it scans it. Just answer Yes at the retry prompt and it will go through.
 - **`[WinError 10051] A socket operation was attempted to an unreachable network`**: high `--workers` (e.g. 64) makes many concurrent connections to Cloudflare R2 from one IP, which their anti-abuse layer silently drops. Windows then reports the network as unreachable. **Recommended `--workers` is 4-8.** If you see a whole batch fail with this error, drop the worker count and re-run.
 - **Ctrl+C unresponsive during downloads**: the first press sets a stop flag and lets the script unwind gracefully, but it has to wait for in-flight TCP connections to finish (up to 10s with the connect timeout) before workers see the flag. **Press Ctrl+C a second time to force-quit immediately.** A force-quit skips the manifest write for whatever was in flight. The next run re-evaluates from page-published sizes.

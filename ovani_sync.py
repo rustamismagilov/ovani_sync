@@ -266,6 +266,32 @@ def scrape_assets(session: requests.Session) -> list[Asset]:
     return assets
 
 
+def _order_id_num(order_num: str) -> int:
+    """Numeric part of an order label like '#117070' -> 117070, else 0."""
+    digits = re.sub(r"\D", "", order_num)
+    return int(digits) if digits else 0
+
+
+def dedupe_assets(assets: list[Asset], base: Path) -> list[Asset]:
+    """Collapse assets that resolve to the same destination path.
+
+    The same file often appears in several orders, each with its own download
+    URL, so the URL dedupe in scrape_assets misses them. Keep the copy from the
+    highest order id and drop the rest. Survivors keep their first-seen order.
+    """
+    best: dict[Path, Asset] = {}
+    order: list[Path] = []
+    for asset in assets:
+        target = asset.target(base)
+        current = best.get(target)
+        if current is None:
+            best[target] = asset
+            order.append(target)
+        elif _order_id_num(asset.order_num) > _order_id_num(current.order_num):
+            best[target] = asset
+    return [best[target] for target in order]
+
+
 def download_one(session: requests.Session, asset: Asset, target: Path,
                  pbar_position: int = 0) -> tuple[Path, str, int]:
     """Download one asset to `target`. Returns (path, sha256_hex, size_bytes).
@@ -442,8 +468,13 @@ def main() -> int:
 
     print(f"{TAG_INFO} Scraping orders...")
     assets = scrape_assets(session)
+    before = len(assets)
+    assets = dedupe_assets(assets, root)
+    collapsed = before - len(assets)
     weekly = sum(1 for asset in assets if asset.is_weekly)
     print(f"{TAG_OK} Found {len(assets)} downloadable asset(s). Weekly: {weekly}, Regular: {len(assets) - weekly}")
+    if collapsed:
+        print(f"{TAG_INFO} Found {collapsed} EXACT duplicates across multiple orders.")
 
     # Build the plan from page-scraped sizes. No per-asset HTTP round-trip.
     targets = [asset.target(root) for asset in assets]
